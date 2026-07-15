@@ -1,15 +1,18 @@
-"""Benchmark latency across PyTorch FP32 and ONNX FP32.
+"""Benchmark latency across PyTorch FP32, ONNX FP32, and INT8.
+
+INT8 uses onnxruntime's static quantization with a small calibration set drawn
+from the validation images. If INT8 tooling is unavailable, benchmark an FP16
+ONNX export instead (note which you used in the README).
 
 Usage:
     python src/benchmark.py --pt weights/best.pt --onnx weights/best.onnx \
-        --imgsz 640 --runs 100
-
-INT8 quantization is added on top of this in a later step.
+        --calib-dir dataset/images/val --imgsz 640 --runs 100
 """
 
 from __future__ import annotations
 
 import argparse
+import glob
 import os
 import time
 
@@ -49,10 +52,50 @@ def bench_pytorch(weights: str, sample_img: np.ndarray, imgsz: int, runs: int) -
     return {"mean_ms": arr.mean(), "p95_ms": np.percentile(arr, 95), "fps": 1000.0 / arr.mean()}
 
 
+class CalibReader:
+    """Static-quantization calibration data reader for onnxruntime."""
+
+    def __init__(self, calib_dir: str, input_name: str, imgsz: int, limit: int = 100):
+        self.input_name = input_name
+        self.imgsz = imgsz
+        files = sorted(glob.glob(os.path.join(calib_dir, "*")))[:limit]
+        self.files = iter(files)
+
+    def get_next(self):
+        try:
+            path = next(self.files)
+        except StopIteration:
+            return None
+        img = cv2.imread(path)
+        if img is None:
+            return self.get_next()
+        blob, _, _ = preprocess(img, self.imgsz)
+        return {self.input_name: blob}
+
+
+def quantize_int8(onnx_path: str, calib_dir: str, imgsz: int) -> str:
+    from onnxruntime.quantization import CalibrationDataReader, QuantType, quantize_static
+
+    sess = ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"])
+    input_name = sess.get_inputs()[0].name
+
+    class _Reader(CalibrationDataReader):
+        def __init__(self):
+            self.r = CalibReader(calib_dir, input_name, imgsz)
+
+        def get_next(self):
+            return self.r.get_next()
+
+    out_path = onnx_path.replace(".onnx", "_int8.onnx")
+    quantize_static(onnx_path, out_path, _Reader(), weight_type=QuantType.QInt8)
+    return out_path
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Latency benchmark")
     p.add_argument("--pt", default=None, help="PyTorch weights (.pt) for FP32 baseline")
     p.add_argument("--onnx", required=True)
+    p.add_argument("--calib-dir", default=None, help="Val images for INT8 calibration")
     p.add_argument("--imgsz", type=int, default=640)
     p.add_argument("--runs", type=int, default=100)
     p.add_argument("--sample", default=None, help="One image to drive the benchmark")
@@ -77,6 +120,12 @@ def main() -> None:
 
     r = bench_onnx(args.onnx, blob, args.runs)
     print(f"{'ONNX FP32':<22}{r['mean_ms']:>12.2f}{r['p95_ms']:>12.2f}{r['fps']:>10.1f}")
+
+    if args.calib_dir:
+        int8_path = quantize_int8(args.onnx, args.calib_dir, args.imgsz)
+        r = bench_onnx(int8_path, blob, args.runs)
+        print(f"{'ONNX INT8':<22}{r['mean_ms']:>12.2f}{r['p95_ms']:>12.2f}{r['fps']:>10.1f}")
+        print(f"\nINT8 model written to: {int8_path}")
 
 
 if __name__ == "__main__":
