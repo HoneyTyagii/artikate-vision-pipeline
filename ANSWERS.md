@@ -1,4 +1,4 @@
-# Artikate Studio -Written Answers
+# Artikate Studio - Written Answers
 
 ---
 
@@ -58,7 +58,7 @@ client's line:
 
 ---
 
-### Scenario B -Boxes drift on one camera feed only, offset grows toward edges
+### Scenario B - Boxes drift on one camera feed only, offset grows toward edges
 
 **What the pattern tells me.** The error is *systematic* (always shifted, never
 random) and *edge-magnified*. That signature points away from the model (which is
@@ -104,7 +104,7 @@ the transform using each feed's *actual* frame dimensions, not a hard-coded shap
 
 ---
 
-### Scenario C -97% → 84% over three months, zero code/model changes
+### Scenario C - 97% → 84% over three months, zero code/model changes
 
 **Plausible causes**
 
@@ -146,13 +146,71 @@ review 50 recent frames -turning a 3-month silent drift into a 2-week alert.
 
 ---
 
-## Section 3 -Find the Silent Bug
+## Section 3 - Find the Silent Bug
 
-_To be completed once the provided broken repo is received (added in a follow-up commit)._
+> The definitive answer depends on the broken repo Artikate provides. Below is
+> the method I follow plus a concrete worked example of exactly this class of bug
+> that I found and fixed in this repo's own preprocessing (commit
+> `fix: correct letterbox padding rounding causing box drift`).
+
+### Method (how I narrow it down)
+
+A detector that "runs fine but is wrong ~1 in 5 times" almost always fails in one
+of four places: data preprocessing, coordinate-space mapping, NMS/postprocessing,
+or confidence handling. I bisect by asserting exact numeric output at each stage
+against a known input, rather than eyeballing overlays:
+
+1. Feed a synthetic image with a known object at known pixel coordinates.
+2. Dump the tensor after preprocessing and compare to the expected letterboxed
+   tensor (`np.allclose`).
+3. Decode one raw model output and check the box coordinates and the class/score
+   ranking against hand-computed values.
+4. Run NMS on hand-built overlapping boxes and assert which indices survive.
+
+Whichever stage first diverges from the expected numbers is where the bug lives.
+
+### Worked example (real bug fixed in this repo)
+
+- **File & line:** `src/utils.py`, in `letterbox()`. The original padding used
+  `top, bottom = int(dh), int(dh)` (and the same for left/right).
+- **What it does wrong:** `int()` truncates the sub-pixel padding remainder, so
+  `top + bottom` can be up to a pixel short of the required padding. The image is
+  under-padded, which shifts where the real content sits inside the letterboxed
+  square. Because predictions are mapped back through that same padding offset,
+  every box is shifted by a sub-pixel-to-1-pixel amount.
+- **Why it looks plausible most of the time:** a shift under one pixel is
+  invisible in a casual demo, and on near-square inputs `dh`/`dw` are small so the
+  error is tiny. It only becomes material on strongly non-square frames and for
+  objects near the edges, where the accumulated offset is largest. This is exactly
+  the "1 in 5 predictions subtly wrong" signature: correct-looking on most frames,
+  quietly off on the ones that matter for exact coordinates.
+- **Fix:** round each side independently so the two sides sum back to the exact
+  target size:
+
+  ```python
+  top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
+  left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
+  ```
+
+- **Test that would have caught it:** a golden-value test that letterboxes a
+  non-square image and asserts `top + bottom == target - resized_h` (and the
+  left/right equivalent), plus the `scale_boxes` round-trip test in
+  `tests/test_postprocess.py` that asserts a box maps back inside the original
+  image bounds.
+
+### What this suggests about the original testing process
+
+The bug survived because postprocessing was validated visually (do the boxes look
+right?) rather than numerically (are the coordinates exactly right?). A visual
+check cannot catch a sub-pixel, edge-dependent offset. The gap is closed by
+pinning the coordinate-mapping and NMS math with golden-value unit tests that
+assert exact numbers on synthetic inputs, and running them in CI so any future
+change to preprocessing or postprocessing fails loudly instead of silently
+shifting every box.
 
 ---
 
-## Section 4 -Edge & Air-Gapped Deployment Design
+## Section 4 - Edge & Air-Gapped Deployment Design
 
 **Setup:** 8× 1080p @ 15 fps, one Jetson AGX Orin (64GB), fully air-gapped,
 end-to-end latency < 200 ms/frame, no cloud ever (including model updates).
