@@ -1,0 +1,22 @@
+# Ultralytics dataset config for the Artikate private inspection set.
+#
+# Expected layout (YOLO format) after you unpack the provided data:
+#
+#   dataset/
+#     images/train/*.jpg
+#     images/val/*.jpg
+#     labels/train/*.txt
+#     labels/val/*.txt
+#
+# Update `path` to wherever you unpacked the private dataset.
+# `names` MUST match the class list in the provided annotations.
+
+path: ../dataset
+train: images/train
+val: images/val
+
+# TODO: replace with the actual class names from the provided annotations.
+names:
+  0: defect
+  # 1: scratch
+  # 2: dent
