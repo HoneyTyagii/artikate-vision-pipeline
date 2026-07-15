@@ -17,6 +17,8 @@ datasets/
 weights/*.pt
 weights/*.onnx
 *.engine
+# Base checkpoints auto-downloaded by Ultralytics into the repo root
+yolov8*.pt
 
 # Training / benchmark outputs
 runs/
@@ -28,3 +30,7 @@ results/*.png
 .DS_Store
 .idea/
 .vscode/
+
+# Local demo scaffolding (synthetic data for rehearsal, not the real submission)
+configs/demo_dataset.yaml
+scripts/make_demo_data.py
