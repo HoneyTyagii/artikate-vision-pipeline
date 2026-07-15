@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# Data & artifacts (keep repo light; document how to obtain them)
+dataset/
+datasets/
+*.mp4
+*.avi
+*.mov
+
+# Model weights & exports
+weights/*.pt
+weights/*.onnx
+*.engine
+
+# Training / benchmark outputs
+runs/
+results/*.csv
+results/*.json
+results/*.png
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
