@@ -11,6 +11,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import csv
 import time
 
 import cv2
@@ -39,6 +40,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--conf", type=float, default=0.25)
     p.add_argument("--iou", type=float, default=0.45)
     p.add_argument("--out", default=None, help="Optional annotated video path")
+    p.add_argument("--csv", default="results/per_frame.csv")
     return p.parse_args()
 
 
@@ -60,6 +62,7 @@ def main() -> None:
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         writer = cv2.VideoWriter(args.out, fourcc, fps, (w, h))
 
+    rows = []
     latencies = []
     frame_idx = 0
 
@@ -79,6 +82,15 @@ def main() -> None:
             output, r, pad, frame.shape[:2], args.conf, args.iou
         )
 
+        rows.append(
+            {
+                "frame": frame_idx,
+                "num_detections": len(scores),
+                "confidences": ";".join(f"{s:.3f}" for s in scores),
+                "class_ids": ";".join(str(int(c)) for c in class_ids),
+                "latency_ms": f"{latency_ms:.2f}",
+            }
+        )
         print(
             f"Frame {frame_idx:04d} | dets={len(scores):2d} | "
             f"latency={latency_ms:6.2f} ms"
@@ -103,6 +115,15 @@ def main() -> None:
     cap.release()
     if writer is not None:
         writer.release()
+
+    with open(args.csv, "w", newline="") as f:
+        w = csv.DictWriter(
+            f,
+            fieldnames=["frame", "num_detections", "confidences", "class_ids", "latency_ms"],
+        )
+        w.writeheader()
+        w.writerows(rows)
+    print("Per-frame log written to:", args.csv)
 
     if latencies:
         arr = np.array(latencies)
