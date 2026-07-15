@@ -34,8 +34,12 @@ def letterbox(
     if (w, h) != new_unpad:
         img = cv2.resize(img, new_unpad, interpolation=cv2.INTER_LINEAR)
 
-    top, bottom = int(dh), int(dh)
-    left, right = int(dw), int(dw)
+    # Round each side independently so top+bottom (and left+right) padding sums
+    # back to the exact target size. Truncating with int() drops the sub-pixel
+    # remainder, under-padding by up to a pixel and shifting predictions - an
+    # error that compounds toward the frame edges when boxes are mapped back.
+    top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
+    left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
     img = cv2.copyMakeBorder(
         img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color
     )

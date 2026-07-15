@@ -36,7 +36,6 @@ def bench_onnx(model_path: str, sample: np.ndarray, runs: int, warmup: int = 10)
     arr = np.array(times)
     return {"mean_ms": arr.mean(), "p95_ms": np.percentile(arr, 95), "fps": 1000.0 / arr.mean()}
 
-
 def bench_pytorch(weights: str, sample_img: np.ndarray, imgsz: int, runs: int) -> dict:
     from ultralytics import YOLO
 
